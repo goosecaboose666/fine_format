@@ -22,7 +22,7 @@ export const ProcessingStatus: React.FC<ProcessingStatusProps> = ({
   totalEstimatedTime,
 }) => {
   const [dots, setDots] = useState('');
-  const intervalRef = useRef<NodeJS.Timeout>();
+  const intervalRef = useRef<ReturnType<typeof setInterval>>();
 
   useEffect(() => {
     if (isProcessing) {

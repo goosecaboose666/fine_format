@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { geminiService } from '../services/geminiService';
+import { openRouterService } from '../services/openRouterService';
 import { downloadService } from '../services/downloadService';
 import type { FileData, UrlData, ProcessedData, FineTuningGoal } from '../types';
 
@@ -35,7 +36,7 @@ export function useDatasetGeneration() {
 
       // Step 2: Perform web research for knowledge gaps
       setCurrentStep('Performing web research for knowledge gaps...');
-      // const researchData = await geminiService.performWebResearch(themes, fineTuningGoal);
+      // Future feature: Implement web research
       setProgress(40);
 
       // Step 3: Generate Q&A pairs from original content
@@ -51,38 +52,56 @@ export function useDatasetGeneration() {
 
       // Step 4: Generate synthetic Q&A pairs
       setCurrentStep('Generating synthetic Q&A pairs...');
-      await geminiService.generateQAPairs(
+      const syntheticPairs = await geminiService.generateQAPairs(
         [],
         themes,
         fineTuningGoal
       );
+
+      const allPairs = [...qaPairs, ...syntheticPairs];
       setProgress(75);
 
-      // Step 5: Validate all Q&A pairs
-      setCurrentStep('Validating Q&A pairs...');
-      const allPairs = [...qaPairs];
-      await geminiService.validateQAPairs(allPairs);
+      // Step 5: Validate all Q&A pairs using OpenRouter (Intelligent Model)
+      setCurrentStep('Validating Q&A pairs with advanced model...');
+      const validationResults = await openRouterService.validateQAPairs(allPairs);
       setProgress(85);
 
       // Step 6: Generate incorrect answers for training
       setCurrentStep('Generating incorrect answers...');
-      await geminiService.generateQAPairs([], themes, fineTuningGoal);
+      // Currently disabled as it's not fully implemented
       setProgress(95);
 
       // Step 7: Compile final dataset
       setCurrentStep('Compiling final dataset...');
-      const finalData: ProcessedData = {
-        qaPairs: qaPairs.map(pair => ({
+
+      // Map validation results back to pairs
+      const validatedPairs = allPairs.map((pair, index) => {
+        // Find matching result or use default
+        // We used sequential indexing in the batch validator
+        const result = validationResults.find(r => r.pairId === `pair-${index}`) ||
+                       (validationResults[index] /* fallback */);
+
+        return {
           user: pair.question,
           model: pair.answer,
-          isCorrect: true,
-          source: 'original'
-        })),
-        combinedCleanedText: '',
+          isCorrect: pair.isCorrect ?? true,
+          source: pair.source || 'original',
+          // Augment with validation data
+          validation: result ? {
+            isValid: result.isValid,
+            confidence: result.confidence,
+            reasoning: result.reasoning
+          } : undefined
+        };
+      });
+
+      const finalData: ProcessedData = {
+        qaPairs: validatedPairs,
+        combinedCleanedText: allContent.map(c => c.content).join('\n\n'),
         sourceFileCount: files.length,
         sourceUrlCount: urls.length,
         identifiedThemes: themes,
-        correctAnswerCount: qaPairs.length,
+        correctAnswerCount: validatedPairs.length,
         incorrectAnswerCount: 0,
       };
 
