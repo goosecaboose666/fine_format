@@ -1,4 +1,4 @@
-import type { FineTuningGoal } from '../types';
+import type { FineTuningGoal, QAPair } from '../types';
 
 class GeminiService {
   private isInitialized = false;
@@ -158,6 +158,54 @@ Generate 10-15 diverse Q&A pairs. Return a pure JSON array with objects containi
       confidence: 0.85 + (Math.random() * 0.15),
       factualAccuracy: 0.9 + (Math.random() * 0.1),
     }));
+  }
+
+  async generateIncorrectAnswers(correctPairs: any[]): Promise<any[]> {
+    if (correctPairs.length === 0) return [];
+
+    // Process a subset to save tokens/time, or all. Let's do up to 10.
+    const pairsToProcess = correctPairs.slice(0, 10);
+
+    const prompt = `For each of the following Question-Answer pairs, generate a "distractor" answer.
+    A distractor is an incorrect but plausible answer that a model might generate if it hallucinates or misunderstands.
+
+    Pairs:
+    ${pairsToProcess.map((p, i) => `Pair ${i+1}:
+    Q: ${p.question}
+    A: ${p.answer}`).join('\n\n')}
+
+    Return a pure JSON array (no markdown) of objects containing:
+    - "original_question": (string)
+    - "incorrect_answer": (string)
+    `;
+
+    try {
+      const response = await this.makeRequest([{
+        role: 'user',
+        parts: [{ text: prompt }]
+      }]);
+
+      const cleanResponse = response.replace(/```json/g, '').replace(/```/g, '').trim();
+      let results = [];
+
+      const jsonMatch = cleanResponse.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+         results = JSON.parse(jsonMatch[0]);
+      } else {
+         results = JSON.parse(cleanResponse);
+      }
+
+      return results.map((res: any) => ({
+        question: res.original_question,
+        answer: res.incorrect_answer,
+        isCorrect: false,
+        source: 'generated_distractor'
+      }));
+
+    } catch (error) {
+      console.error('Error generating incorrect answers:', error);
+      return [];
+    }
   }
 }
 
