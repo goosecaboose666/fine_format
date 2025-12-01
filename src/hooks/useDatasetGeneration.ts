@@ -63,29 +63,41 @@ export function useDatasetGeneration() {
 
       // Step 5: Validate all Q&A pairs
       setCurrentStep('Validating Q&A pairs...');
-      await geminiService.validateQAPairs(allPairs);
+      const validationResults = await openRouterService.validateQAPairs(allPairs);
+
+      // Update pairs with validation info
+      allPairs.forEach((pair, index) => {
+          if (validationResults[index]) {
+             pair.validationStatus = validationResults[index].isValid ? 'validated' : 'rejected';
+             pair.validationConfidence = validationResults[index].confidence;
+          }
+      });
       setProgress(85);
 
       // Step 6: Generate incorrect answers for training
       setCurrentStep('Generating incorrect answers...');
-      // Currently disabled as it's not fully implemented
+      const incorrectPairs = await geminiService.generateIncorrectAnswers(allPairs);
       setProgress(95);
 
       // Step 7: Compile final dataset
       setCurrentStep('Compiling final dataset...');
+      const finalAllPairs = [...allPairs, ...incorrectPairs];
+
       const finalData: ProcessedData = {
-        qaPairs: allPairs.map(pair => ({
+        qaPairs: finalAllPairs.map(pair => ({
           user: pair.question,
           model: pair.answer,
           isCorrect: pair.isCorrect ?? true,
-          source: pair.source || 'original'
+          source: pair.source || 'original',
+          validationStatus: pair.validationStatus,
+          validationConfidence: pair.validationConfidence
         })),
         combinedCleanedText: allContent.map(c => c.content).join('\n\n'),
         sourceFileCount: files.length,
         sourceUrlCount: urls.length,
         identifiedThemes: themes,
         correctAnswerCount: allPairs.length,
-        incorrectAnswerCount: 0,
+        incorrectAnswerCount: incorrectPairs.length,
       };
 
       setProcessedData(finalData);
