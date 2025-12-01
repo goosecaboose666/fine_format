@@ -25,6 +25,7 @@ export interface SyntheticQAPair extends Omit<QAPair, 'source'> {
 }
 
 export interface ValidationResult {
+  pairId?: string;
   isValid: boolean;
   confidence: number;
   reasoning: string;

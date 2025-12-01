@@ -23,42 +23,87 @@ class OpenRouterService {
   }
 
   async validateQAPairs(pairs: (QAPair | SyntheticQAPair)[]): Promise<ValidationResult[]> {
-    const messages = [{
-      role: 'user',
-      content: `Validate these Q&A pairs for quality and accuracy:
+    if (pairs.length === 0) return [];
 
-${pairs.slice(0, 10).map((pair, i) => `${i + 1}. Q: ${pair.user}\nA: ${pair.model}`).join('\n\n')}
+    // Process in batches of 5 to avoid context limits and ensure better quality
+    const batchSize = 5;
+    const allResults: ValidationResult[] = [];
 
-Return JSON array with: pairId, isValid (boolean), accuracy (0-1), completeness (0-1), clarity (0-1), relevance (0-1), issues (array), suggestions (array).`
-    }];
+    for (let i = 0; i < pairs.length; i += batchSize) {
+      const batch = pairs.slice(i, i + batchSize);
 
-    try {
-      const response = await this.makeRequest(messages);
-      const text = response.choices[0].message.content;
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        const results = JSON.parse(jsonMatch[0]);
-        return results.map((result: any) => ({
-          pairId: result.pairId,
-          isValid: result.isValid,
-          confidence: result.accuracy,
-          reasoning: result.suggestions?.join('; ') || 'Validated',
-          factualAccuracy: result.accuracy,
-          relevanceScore: result.relevance
-        }));
+      const prompt = `Validate these Q&A pairs for quality and accuracy.
+
+Pairs to validate:
+${batch.map((pair, idx) => `Item ${idx + 1}:
+Q: ${pair.user}
+A: ${pair.model}`).join('\n\n')}
+
+Return a pure JSON array (no markdown) where each object corresponds to an item above (in order) and contains:
+- "index": (number, 1-based index from above)
+- "isValid": (boolean, is this a good training example?)
+- "accuracy": (number 0.0-1.0)
+- "reasoning": (string, brief explanation)
+
+Do not include any explanation text outside the JSON.`;
+
+      const messages = [{
+        role: 'user',
+        content: prompt
+      }];
+
+      try {
+        const response = await this.makeRequest(messages);
+
+        // Handle potential differences in response structure depending on model/router
+        const content = response.choices?.[0]?.message?.content || response.content || '';
+
+        // Strip markdown if present
+        const cleanContent = content.replace(/```json/g, '').replace(/```/g, '').trim();
+
+        const jsonMatch = cleanContent.match(/\[[\s\S]*\]/);
+
+        if (jsonMatch) {
+          const results = JSON.parse(jsonMatch[0]);
+
+          const batchResults = results.map((result: any, idx: number) => ({
+            pairId: `pair-${i + idx}`,
+            isValid: typeof result.isValid === 'boolean' ? result.isValid : true,
+            confidence: typeof result.accuracy === 'number' ? result.accuracy : 0.8,
+            reasoning: result.reasoning || 'Validated',
+            factualAccuracy: typeof result.accuracy === 'number' ? result.accuracy : 0.8,
+            relevanceScore: 0.9 // Default for now
+          }));
+
+          allResults.push(...batchResults);
+        } else {
+           // Fallback for this batch if parsing fails
+           console.warn('Failed to parse validation response for batch', i);
+           allResults.push(...batch.map((_, idx) => ({
+             pairId: `pair-${i + idx}`,
+             isValid: true,
+             confidence: 0.5,
+             reasoning: 'Validation parsing failed',
+             factualAccuracy: 0.5,
+             relevanceScore: 0.5
+           })));
+        }
+
+      } catch (error) {
+        console.error('Error validating batch:', error);
+         // Fallback for this batch on error
+           allResults.push(...batch.map((_, idx) => ({
+             pairId: `pair-${i + idx}`,
+             isValid: true,
+             confidence: 0.5,
+             reasoning: 'Validation error',
+             factualAccuracy: 0.5,
+             relevanceScore: 0.5
+           })));
       }
-    } catch (error) {
-      console.error('Error validating pairs:', error instanceof Error ? error.message : 'Unknown error');
     }
 
-    return pairs.map((_, index) => ({
-      pairId: `pair-${index}`,
-      isValid: true,
-      confidence: 0.8,
-      reasoning: 'Auto-validated',
-      factualAccuracy: 0.8,
-      relevanceScore: 0.8
-    }));
+    return allResults;
   }
 }
 

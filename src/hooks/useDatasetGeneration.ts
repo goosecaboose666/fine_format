@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { geminiService } from '../services/geminiService';
+import { openRouterService } from '../services/openRouterService';
 import { downloadService } from '../services/downloadService';
 import type { FileData, UrlData, ProcessedData, FineTuningGoal } from '../types';
 

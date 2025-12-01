@@ -1,4 +1,4 @@
-import type { QAPair, FineTuningGoal } from '../types';
+import type { FineTuningGoal } from '../types';
 
 class GeminiService {
   private isInitialized = false;
