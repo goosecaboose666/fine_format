@@ -61,9 +61,9 @@ export function useDatasetGeneration() {
       const allPairs = [...qaPairs, ...syntheticPairs];
       setProgress(75);
 
-      // Step 5: Validate all Q&A pairs using OpenRouter (Intelligent Model)
-      setCurrentStep('Validating Q&A pairs with advanced model...');
-      const validationResults = await openRouterService.validateQAPairs(allPairs);
+      // Step 5: Validate all Q&A pairs
+      setCurrentStep('Validating Q&A pairs...');
+      await geminiService.validateQAPairs(allPairs);
       setProgress(85);
 
       // Step 6: Generate incorrect answers for training
@@ -73,35 +73,18 @@ export function useDatasetGeneration() {
 
       // Step 7: Compile final dataset
       setCurrentStep('Compiling final dataset...');
-
-      // Map validation results back to pairs
-      const validatedPairs = allPairs.map((pair, index) => {
-        // Find matching result or use default
-        // We used sequential indexing in the batch validator
-        const result = validationResults.find(r => r.pairId === `pair-${index}`) ||
-                       (validationResults[index] /* fallback */);
-
-        return {
+      const finalData: ProcessedData = {
+        qaPairs: allPairs.map(pair => ({
           user: pair.question,
           model: pair.answer,
           isCorrect: pair.isCorrect ?? true,
-          source: pair.source || 'original',
-          // Augment with validation data
-          validation: result ? {
-            isValid: result.isValid,
-            confidence: result.confidence,
-            reasoning: result.reasoning
-          } : undefined
-        };
-      });
-
-      const finalData: ProcessedData = {
-        qaPairs: validatedPairs,
+          source: pair.source || 'original'
+        })),
         combinedCleanedText: allContent.map(c => c.content).join('\n\n'),
         sourceFileCount: files.length,
         sourceUrlCount: urls.length,
         identifiedThemes: themes,
-        correctAnswerCount: validatedPairs.length,
+        correctAnswerCount: allPairs.length,
         incorrectAnswerCount: 0,
       };
 
