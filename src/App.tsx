@@ -7,13 +7,16 @@ import { useDatasetGeneration } from './hooks/useDatasetGeneration';
 import { Card, CardContent } from './components/ui/Card';
 import { Button } from './components/ui/Button';
 import { Download, Settings, Database, RefreshCw } from 'lucide-react';
+import { FINE_TUNING_GOALS } from './constants';
 import type { FileData, UrlData, FineTuningGoal } from './types';
 
 export default function App() {
   const [files, setFiles] = useState<FileData[]>([]);
   const [urls, setUrls] = useState<UrlData[]>([]);
-  const [fineTuningGoal, setFineTuningGoal] = useState<FineTuningGoal>('general' as FineTuningGoal);
+  const [fineTuningGoal, setFineTuningGoal] = useState<FineTuningGoal>('topic');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [gapFilling, setGapFilling] = useState(false);
+  const [appendSources, setAppendSources] = useState(false);
 
   const {
     isProcessing,
@@ -27,7 +30,7 @@ export default function App() {
   } = useDatasetGeneration();
 
   const handleGenerate = () => {
-    generateDataset(files, urls, fineTuningGoal as FineTuningGoal);
+    generateDataset(files, urls, fineTuningGoal, gapFilling, appendSources);
   };
 
   const handleReset = () => {
@@ -96,14 +99,43 @@ export default function App() {
                             background: 'linear-gradient(135deg, rgba(26, 26, 26, 0.8), rgba(26, 26, 26, 0.6))',
                           }}
                         >
-                          <option value="general">General Knowledge</option>
-                          <option value="specific">Domain-Specific</option>
-                          <option value="conversational">Conversational</option>
-                          <option value="analytical">Analytical</option>
+                          {FINE_TUNING_GOALS.map((goal) => (
+                            <option key={goal.id} value={goal.id}>
+                              {goal.name}
+                            </option>
+                          ))}
                         </select>
                         <p className="text-xs text-muted mt-2 font-mono">
                           Select the target behavior for your fine-tuned model
                         </p>
+                      </div>
+
+                      <div className="flex items-center space-x-3">
+                        <input
+                          type="checkbox"
+                          id="gapFilling"
+                          checked={gapFilling}
+                          onChange={(e) => setGapFilling(e.target.checked)}
+                          disabled={isProcessing}
+                          className="w-5 h-5 border-border bg-card rounded focus:ring-primary text-primary"
+                        />
+                        <label htmlFor="gapFilling" className="text-sm font-medium text-foreground cursor-pointer select-none">
+                          Identify & Fill Knowledge Gaps
+                        </label>
+                      </div>
+
+                      <div className="flex items-center space-x-3">
+                        <input
+                          type="checkbox"
+                          id="appendSources"
+                          checked={appendSources}
+                          onChange={(e) => setAppendSources(e.target.checked)}
+                          disabled={isProcessing}
+                          className="w-5 h-5 border-border bg-card rounded focus:ring-primary text-primary"
+                        />
+                        <label htmlFor="appendSources" className="text-sm font-medium text-foreground cursor-pointer select-none">
+                          Append Additional Sources
+                        </label>
                       </div>
                     </div>
                   )}
