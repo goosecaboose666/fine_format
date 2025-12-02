@@ -46,11 +46,11 @@ export default function App() {
             <div className="flex items-center justify-center mb-4">
               <Database className="w-10 h-10 text-accent mr-3 animate-pulse" style={{ filter: 'drop-shadow(0 0 5px #00FFFF)' }} />
               <h1 className="text-4xl font-bold text-primary font-mono tracking-tighter" style={{ textShadow: '0 0 10px rgba(0, 255, 65, 0.5)' }}>
-                AI DATASET GENERATOR
+                Fine Format
               </h1>
             </div>
             <p className="text-muted max-w-2xl mx-auto font-mono text-lg">
-              Transform your documents and web content into <span className="text-primary">high-quality training datasets</span> for fine-tuning AI models.
+              Upload your knowledgebase. Download your dataset.
             </p>
           </div>
 
