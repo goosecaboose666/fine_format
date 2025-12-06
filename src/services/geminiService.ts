@@ -3,6 +3,7 @@ import type { FineTuningGoal, QAPair } from '../types';
 class GeminiService {
   private isInitialized = false;
   private baseUrl = '/.netlify/functions/gemini-chat';
+  private MAX_TOTAL_CONTEXT_CHARS = 12000; // ~3-4k tokens to prevent timeouts
 
   constructor() {
     this.initialize();
@@ -64,10 +65,38 @@ class GeminiService {
     }
   }
 
+  private extractJSON(text: string): any {
+    try {
+      // Remove markdown code blocks if present
+      let cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+
+      // Try to find the JSON array explicitly
+      const firstBracket = cleanText.indexOf('[');
+      const lastBracket = cleanText.lastIndexOf(']');
+
+      if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+          const jsonString = cleanText.substring(firstBracket, lastBracket + 1);
+          return JSON.parse(jsonString);
+      }
+
+      // Fallback to direct parse if no brackets found (e.g. object not array, or raw)
+      return JSON.parse(cleanText);
+    } catch (e) {
+      console.error('JSON extraction failed:', e);
+      throw new Error('Failed to parse JSON response from LLM');
+    }
+  }
+
   async identifyThemes(content: Array<{type: 'file' | 'url', name?: string, url?: string, content: string}>, goal: FineTuningGoal): Promise<string[]> {
+    // Truncate content for themes analysis too
+    let combinedContent = content.map(c => `${c.type === 'file' ? `File: ${c.name}` : `URL: ${c.url}`}\n${c.content}`).join('\n\n');
+    if (combinedContent.length > this.MAX_TOTAL_CONTEXT_CHARS) {
+       combinedContent = combinedContent.substring(0, this.MAX_TOTAL_CONTEXT_CHARS);
+    }
+
     const prompt = `Analyze the following content and identify key themes for ${goal} fine-tuning:
 
-${content.map(c => `${c.type === 'file' ? `File: ${c.name}` : `URL: ${c.url}`}\n${c.content.substring(0, 2000)}`).join('\n\n')}
+${combinedContent}
 
 Return a JSON array of theme names (strings only). Do not include any markdown formatting.`;
 
@@ -77,29 +106,23 @@ Return a JSON array of theme names (strings only). Do not include any markdown f
         parts: [{ text: prompt }]
       }]);
 
-      // Remove markdown code block symbols if present
-      const cleanResponse = response.replace(/```json/g, '').replace(/```/g, '').trim();
-
-      const jsonMatch = cleanResponse.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-      // If direct parsing fails, try to parse the whole response
-      return JSON.parse(cleanResponse);
+      return this.extractJSON(response);
     } catch (error) {
       console.error('Error identifying themes:', error);
-      // Fallback: try to split by newlines if it looks like a list
-      // But return empty for now
+      return [];
     }
-
-    return [];
   }
 
   async generateQAPairs(content: Array<{type: 'file' | 'url', name?: string, url?: string, content: string}>, themes: string[], goal: FineTuningGoal): Promise<any[]> {
     let prompt = `Generate high-quality question-answer pairs from this content for ${goal} fine-tuning.`;
 
     if (content.length > 0) {
-      prompt += `\n\nContent:\n${content.map(c => c.content.substring(0, 1500)).join('\n\n')}`;
+      let combinedContent = content.map(c => c.content).join('\n\n');
+      if (combinedContent.length > this.MAX_TOTAL_CONTEXT_CHARS) {
+        console.warn(`[GEMINI] Content truncated from ${combinedContent.length} to ${this.MAX_TOTAL_CONTEXT_CHARS} chars`);
+        combinedContent = combinedContent.substring(0, this.MAX_TOTAL_CONTEXT_CHARS);
+      }
+      prompt += `\n\nContent:\n${combinedContent}`;
     } else {
       prompt += `\n\nGenerate synthetic Q&A pairs based on the following themes (no specific source content provided).`;
     }
@@ -107,7 +130,7 @@ Return a JSON array of theme names (strings only). Do not include any markdown f
     prompt += `\n\nThemes to focus on:
 ${themes.join(', ')}
 
-Generate 10-15 diverse Q&A pairs. Return a pure JSON array with objects containing: "user" (question), "model" (answer). Do not include markdown formatting.`;
+Generate 5-8 diverse Q&A pairs. Return a pure JSON array with objects containing: "user" (question), "model" (answer). Do not include markdown formatting.`;
 
     try {
       const response = await this.makeRequest([{
@@ -115,11 +138,9 @@ Generate 10-15 diverse Q&A pairs. Return a pure JSON array with objects containi
         parts: [{ text: prompt }]
       }]);
 
-      const cleanResponse = response.replace(/```json/g, '').replace(/```/g, '').trim();
+      const pairs = this.extractJSON(response);
 
-      const jsonMatch = cleanResponse.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        const pairs = JSON.parse(jsonMatch[0]);
+      if (Array.isArray(pairs)) {
         return pairs.map((pair: any) => ({
           question: pair.user || pair.question,
           answer: pair.model || pair.answer,
@@ -128,30 +149,15 @@ Generate 10-15 diverse Q&A pairs. Return a pure JSON array with objects containi
           source: content.length > 0 ? 'original' : 'synthetic'
         }));
       }
-
-      // Fallback
-      const pairs = JSON.parse(cleanResponse);
-       return pairs.map((pair: any) => ({
-          question: pair.user || pair.question,
-          answer: pair.model || pair.answer,
-          isCorrect: true,
-          confidence: 0.9,
-          source: content.length > 0 ? 'original' : 'synthetic'
-        }));
+      return [];
     } catch (error) {
       console.error('Error generating Q&A pairs:', error);
+      return [];
     }
-
-    return [];
   }
 
   async validateQAPairs(pairs: QAPair[]): Promise<any[]> {
-    // Mock validation for now, as implementing full validation might be complex
-    // and expensive in tokens. In a real scenario we would call the LLM.
-
-    // Let's implement a basic LLM validation if needed, or keep the mock but acknowledge it.
-    // For now, I will keep the mock but improve it slightly to look more realistic.
-
+    // Mock validation for now
     return pairs.map((_, index) => ({
       pairId: `pair-${index}`,
       isValid: true,
@@ -163,11 +169,11 @@ Generate 10-15 diverse Q&A pairs. Return a pure JSON array with objects containi
   async generateIncorrectAnswers(correctPairs: any[]): Promise<any[]> {
     if (correctPairs.length === 0) return [];
 
-    // Process a subset to save tokens/time, or all. Let's do up to 10.
-    const pairsToProcess = correctPairs.slice(0, 10);
+    // Process a subset to save tokens/time
+    const pairsToProcess = correctPairs.slice(0, 5); // Reduce to 5 to match the lower batch size
 
     const prompt = `For each of the following Question-Answer pairs, generate a "distractor" answer.
-    A distractor is an incorrect but plausible answer that a model might generate if it hallucinates or misunderstands.
+    A distractor is an incorrect but plausible answer.
 
     Pairs:
     ${pairsToProcess.map((p, i) => `Pair ${i+1}:
@@ -185,22 +191,17 @@ Generate 10-15 diverse Q&A pairs. Return a pure JSON array with objects containi
         parts: [{ text: prompt }]
       }]);
 
-      const cleanResponse = response.replace(/```json/g, '').replace(/```/g, '').trim();
-      let results = [];
+      const results = this.extractJSON(response);
 
-      const jsonMatch = cleanResponse.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-         results = JSON.parse(jsonMatch[0]);
-      } else {
-         results = JSON.parse(cleanResponse);
+      if (Array.isArray(results)) {
+        return results.map((res: any) => ({
+            question: res.original_question,
+            answer: res.incorrect_answer,
+            isCorrect: false,
+            source: 'generated_distractor'
+        }));
       }
-
-      return results.map((res: any) => ({
-        question: res.original_question,
-        answer: res.incorrect_answer,
-        isCorrect: false,
-        source: 'generated_distractor'
-      }));
+      return [];
 
     } catch (error) {
       console.error('Error generating incorrect answers:', error);
